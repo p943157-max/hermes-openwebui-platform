@@ -1,0 +1,35 @@
+name: open-webui-platform
+label: Open WebUI
+kind: platform
+version: 1.0.0
+description: >
+  Open WebUI channels platform adapter for Hermes Agent.
+  Connects to an Open WebUI instance via REST API and Socket.IO,
+  monitors channels, and relays messages to/from the Hermes agent.
+author: local
+requires_env:
+  - name: OPENWEBUI_URL
+    description: "Open WebUI base URL (e.g. http://192.168.68.104:8082)"
+    prompt: "Open WebUI URL"
+    password: false
+  - name: OPENWEBUI_EMAIL
+    description: "Bot account email (e.g. mainbot@hermes.local)"
+    prompt: "Bot email"
+    password: false
+  - name: OPENWEBUI_PASSWORD
+    description: "Bot account password"
+    prompt: "Bot password"
+    password: true
+optional_env:
+  - name: OPENWEBUI_CHANNEL_IDS
+    description: "Comma-separated channel UUIDs to monitor (empty = all channels)"
+    prompt: "Channel IDs (comma-separated, or empty for all)"
+    password: false
+  - name: OPENWEBUI_REQUIRE_MENTION
+    description: "Only respond when bot is @mentioned (true/false, default false)"
+    prompt: "Require mention? (true/false)"
+    password: false
+  - name: OPENWEBUI_BOT_NAME
+    description: "Display name for logging (default: Hermes)"
+    prompt: "Bot display name"
+    password: false
