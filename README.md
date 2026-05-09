@@ -49,7 +49,7 @@ platforms:
           email: mainbot@local.com
           password: yourpassword
           channel_ids:
-            - 53cbbd15-2780-469f-bc20-33a7a6728971
+            - xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
           require_mention: false
         assistant:
           email: assistant@local.com
@@ -68,7 +68,7 @@ OPENWEBUI_ACCOUNTS=main,assistant
 
 OPENWEBUI_MAIN_EMAIL=mainbot@local.com
 OPENWEBUI_MAIN_PASSWORD=yourpassword
-OPENWEBUI_MAIN_CHANNEL_IDS=53cbbd15-2780-469f-bc20-33a7a6728971
+OPENWEBUI_MAIN_CHANNEL_IDS=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
 OPENWEBUI_ASSISTANT_EMAIL=assistant@local.com
 OPENWEBUI_ASSISTANT_PASSWORD=yourpassword
@@ -81,7 +81,7 @@ OPENWEBUI_ASSISTANT_CHANNEL_IDS=a1b2c3d4-0000-0000-0000-000000000000
 OPENWEBUI_URL=http://192.168.1.100:8082
 OPENWEBUI_EMAIL=mainbot@local.com
 OPENWEBUI_PASSWORD=yourpassword
-OPENWEBUI_CHANNEL_IDS=53cbbd15-2780-469f-bc20-33a7a6728971
+OPENWEBUI_CHANNEL_IDS=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 OPENWEBUI_REQUIRE_MENTION=false
 ```
 
@@ -90,7 +90,7 @@ OPENWEBUI_REQUIRE_MENTION=false
 In Open WebUI, navigate to your channel and copy the UUID from the URL:
 
 ```
-http://your-openwebui/channels/53cbbd15-2780-469f-bc20-33a7a6728971
+http://your-openwebui/channels/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
                                 This is your channel_id
 ```
