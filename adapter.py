@@ -8,38 +8,38 @@ openclaw's open-webui-multi plugin.
 Configuration (config.yaml platforms.open-webui.extra):
 
     extra:
-      base_url: http://192.168.68.104:8082
+      base_url: http://192.168.1.100:8082
       accounts:
-        hermes:
-          email: mainbot@hermes.local
-          password: hermes
+        main:
+          email: mainbot@local.com
+          password: yourpassword
           channel_ids:
-            - 53cbbd15-2780-469f-bc20-33a7a6728971
+            - xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
           require_mention: false
-        fox:
-          email: fox@hermes.local
-          password: hermes
+        assistant:
+          email: assistant@local.com
+          password: yourpassword
           channel_ids:
-            - <another-uuid>
+            - yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy
 
 Environment variable fallback (single-account, backward-compatible):
 
-    OPENWEBUI_URL=http://192.168.68.104:8082
-    OPENWEBUI_EMAIL=mainbot@hermes.local
-    OPENWEBUI_PASSWORD=hermes
-    OPENWEBUI_CHANNEL_IDS=53cbbd15-...
+    OPENWEBUI_URL=http://192.168.1.100:8082
+    OPENWEBUI_EMAIL=mainbot@local.com
+    OPENWEBUI_PASSWORD=yourpassword
+    OPENWEBUI_CHANNEL_IDS=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
     OPENWEBUI_REQUIRE_MENTION=false
 
 Multi-account via env vars:
 
-    OPENWEBUI_URL=http://192.168.68.104:8082
-    OPENWEBUI_ACCOUNTS=hermes,fox
-    OPENWEBUI_HERMES_EMAIL=mainbot@hermes.local
-    OPENWEBUI_HERMES_PASSWORD=hermes
-    OPENWEBUI_HERMES_CHANNEL_IDS=53cbbd15-...
-    OPENWEBUI_FOX_EMAIL=fox@hermes.local
-    OPENWEBUI_FOX_PASSWORD=hermes
-    OPENWEBUI_FOX_CHANNEL_IDS=<uuid>
+    OPENWEBUI_URL=http://192.168.1.100:8082
+    OPENWEBUI_ACCOUNTS=main,assistant
+    OPENWEBUI_MAIN_EMAIL=mainbot@local.com
+    OPENWEBUI_MAIN_PASSWORD=yourpassword
+    OPENWEBUI_MAIN_CHANNEL_IDS=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    OPENWEBUI_ASSISTANT_EMAIL=assistant@local.com
+    OPENWEBUI_ASSISTANT_PASSWORD=yourpassword
+    OPENWEBUI_ASSISTANT_CHANNEL_IDS=yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy
 """
 
 from __future__ import annotations
@@ -63,6 +63,7 @@ from gateway.platforms.base import (
     SendResult,
     MessageEvent,
     MessageType,
+    resolve_channel_prompt,
 )
 from gateway.config import PlatformConfig, Platform
 
@@ -547,16 +548,43 @@ class OpenWebUIAdapter(BasePlatformAdapter):
                 asyncio.create_task(self._reconnect_account(conn))
 
     async def _reconnect_account(self, conn: _AccountConn) -> None:
-        """Re-establish a single account's WebSocket after an unexpected drop."""
-        await asyncio.sleep(5.0)
-        logger.info("%s: attempting reconnect...", conn.label)
-        if await self._connect_account(conn):
-            # Refresh channel routing map
-            for ch_id in conn.channel_ids:
-                self._channel_to_conn[ch_id] = conn
-            logger.info("%s: reconnected", conn.label)
-        else:
-            logger.error("%s: reconnect failed", conn.label)
+        """Re-establish a single account's WebSocket after an unexpected drop.
+
+        Retries with exponential backoff (5s → 10s → 20s → … capped at 60s)
+        until the connection succeeds, so a temporary Open WebUI restart does
+        not leave the account permanently offline.
+        """
+        # Cancel the orphaned heartbeat from the old connection before we start
+        # creating new tasks, otherwise it leaks as a zombie.
+        old_hb = conn.heartbeat_task
+        if old_hb and not old_hb.done():
+            old_hb.cancel()
+            try:
+                await old_hb
+            except (asyncio.CancelledError, Exception):
+                pass
+        conn.heartbeat_task = None
+
+        delay = 5.0
+        max_delay = 60.0
+        attempt = 0
+
+        while self.is_connected:
+            await asyncio.sleep(delay)
+            attempt += 1
+            logger.info("%s: reconnect attempt %d (delay was %.0fs)...", conn.label, attempt, delay)
+
+            if await self._connect_account(conn):
+                for ch_id in conn.channel_ids:
+                    self._channel_to_conn[ch_id] = conn
+                logger.info("%s: reconnected after %d attempt(s)", conn.label, attempt)
+                return
+
+            delay = min(delay * 2, max_delay)
+            logger.warning(
+                "%s: reconnect attempt %d failed, retrying in %.0fs",
+                conn.label, attempt, delay,
+            )
 
     # ── Frame parsing (per account) ───────────────────────────────────────────
 
@@ -665,6 +693,12 @@ class OpenWebUIAdapter(BasePlatformAdapter):
             user_name=sender_name,
         )
 
+        channel_prompt = resolve_channel_prompt(
+            getattr(self.config, "extra", {}) or {},
+            channel_id,
+            parent_id or None,
+        )
+
         evt = MessageEvent(
             text=text,
             message_type=MessageType.TEXT,
@@ -672,6 +706,7 @@ class OpenWebUIAdapter(BasePlatformAdapter):
             message_id=message_id,
             timestamp=datetime.datetime.now(),
             reply_to_message_id=message_id,
+            channel_prompt=channel_prompt,
             raw_message={
                 "account_id": conn.account_id,
                 "channel_id": channel_id,
@@ -758,15 +793,11 @@ def _env_enablement(config=None) -> dict | None:
                 seed["home_channel"] = {"chat_id": first_channels[0], "name": first_channels[0]}
             return seed
 
-    # Single-account via env
-    email = os.getenv("OPENWEBUI_EMAIL", "").strip()
-    password = os.getenv("OPENWEBUI_PASSWORD", "").strip()
-    if not (email and password):
-        return None
+    # Single-account via env — intentionally do NOT inject accounts into the seed.
+    # gateway does extra.update(seed), so injecting accounts here would overwrite
+    # any accounts already configured in config.yaml, breaking multi-account setups.
+    # The adapter's _build_accounts() reads OPENWEBUI_EMAIL/PASSWORD directly.
     channel_ids = _parse_channel_ids(os.getenv("OPENWEBUI_CHANNEL_IDS", ""))
-    seed["accounts"] = {
-        "default": {"email": email, "password": password, "channel_ids": channel_ids}
-    }
     if channel_ids:
         seed["home_channel"] = {"chat_id": channel_ids[0], "name": channel_ids[0]}
     return seed
