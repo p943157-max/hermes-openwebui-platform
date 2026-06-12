@@ -772,31 +772,20 @@ def _env_enablement(config=None) -> dict | None:
 
     seed: Dict[str, Any] = {"base_url": url}
 
-    # Multi-account via env
+    # Do NOT inject accounts into the seed — gateway does extra.update(seed),
+    # which would overwrite any accounts already in config.yaml.
+    # _build_accounts() reads OPENWEBUI_ACCOUNTS / OPENWEBUI_EMAIL directly.
+    #
+    # Only set home_channel for cron delivery routing.
     accts_env = os.getenv("OPENWEBUI_ACCOUNTS", "").strip()
     if accts_env:
-        accounts: Dict[str, Any] = {}
-        for acct_id in [a.strip() for a in accts_env.split(",") if a.strip()]:
-            prefix = f"OPENWEBUI_{acct_id.upper()}_"
-            email = os.getenv(f"{prefix}EMAIL", "")
-            password = os.getenv(f"{prefix}PASSWORD", "")
-            if email and password:
-                accounts[acct_id] = {
-                    "email": email,
-                    "password": password,
-                    "channel_ids": _parse_channel_ids(os.getenv(f"{prefix}CHANNEL_IDS", "")),
-                }
-        if accounts:
-            seed["accounts"] = accounts
-            first_channels = next(iter(accounts.values())).get("channel_ids", [])
-            if first_channels:
-                seed["home_channel"] = {"chat_id": first_channels[0], "name": first_channels[0]}
-            return seed
+        first_acct = accts_env.split(",")[0].strip()
+        prefix = f"OPENWEBUI_{first_acct.upper()}_"
+        first_channels = _parse_channel_ids(os.getenv(f"{prefix}CHANNEL_IDS", ""))
+        if first_channels:
+            seed["home_channel"] = {"chat_id": first_channels[0], "name": first_channels[0]}
+        return seed
 
-    # Single-account via env — intentionally do NOT inject accounts into the seed.
-    # gateway does extra.update(seed), so injecting accounts here would overwrite
-    # any accounts already configured in config.yaml, breaking multi-account setups.
-    # The adapter's _build_accounts() reads OPENWEBUI_EMAIL/PASSWORD directly.
     channel_ids = _parse_channel_ids(os.getenv("OPENWEBUI_CHANNEL_IDS", ""))
     if channel_ids:
         seed["home_channel"] = {"chat_id": channel_ids[0], "name": channel_ids[0]}
