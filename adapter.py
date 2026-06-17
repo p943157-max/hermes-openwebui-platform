@@ -64,6 +64,7 @@ from gateway.platforms.base import (
     MessageEvent,
     MessageType,
     resolve_channel_prompt,
+    cache_image_from_bytes,
 )
 from gateway.config import PlatformConfig, Platform
 
@@ -124,6 +125,18 @@ def _parse_channel_ids(raw) -> List[str]:
 def _extract_channel_id(chat_id: str) -> str:
     """Strip optional ':parent_id' suffix from a peer_id to get the channel UUID."""
     return chat_id.split(":")[0]
+
+
+def _content_type_to_ext(content_type: str) -> str:
+    ct = content_type.split(";")[0].strip().lower()
+    return {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+        "image/bmp": ".bmp",
+        "image/tiff": ".tiff",
+    }.get(ct, ".jpg")
 
 
 # ── Main adapter ──────────────────────────────────────────────────────────────
@@ -658,6 +671,7 @@ class OpenWebUIAdapter(BasePlatformAdapter):
         self._channel_to_conn.setdefault(channel_id, conn)
 
         text: str = (message.get("content") or "").strip()
+        media_urls, media_types = await self._fetch_media(conn, message)
 
         # Mention check
         if conn.require_mention and not is_dm and conn.user_id:
@@ -707,6 +721,8 @@ class OpenWebUIAdapter(BasePlatformAdapter):
             timestamp=datetime.datetime.now(),
             reply_to_message_id=message_id,
             channel_prompt=channel_prompt,
+            media_urls=media_urls,
+            media_types=media_types,
             raw_message={
                 "account_id": conn.account_id,
                 "channel_id": channel_id,
@@ -716,6 +732,58 @@ class OpenWebUIAdapter(BasePlatformAdapter):
         )
 
         await self.handle_message(evt)
+
+    # ── Media helpers ─────────────────────────────────────────────────────────
+
+    async def _fetch_media(self, conn: _AccountConn, message: dict):
+        """Download image attachments from Open WebUI.
+
+        Returns (paths, mime_types) — parallel lists for MessageEvent.media_urls
+        and MessageEvent.media_types.
+        """
+        files = (message.get("data") or {}).get("files") or []
+        if not files:
+            return [], []
+
+        media_paths: List[str] = []
+        media_types: List[str] = []
+        for entry in files:
+            if not isinstance(entry, dict):
+                continue
+            file_info = entry.get("file") or {}
+            file_id = file_info.get("id")
+            if not file_id:
+                continue
+
+            # Prefer meta.content_type from the message data (no extra request)
+            meta_ct = (file_info.get("meta") or {}).get("content_type", "")
+
+            url = f"{self.base_url}/api/v1/files/{file_id}/content"
+            try:
+                async with self._session.get(
+                    url,
+                    headers={"Authorization": f"Bearer {conn.token}"},
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as resp:
+                    if not resp.ok:
+                        logger.warning(
+                            "%s: file download failed (%s) for id=%s",
+                            conn.label, resp.status, file_id,
+                        )
+                        continue
+                    content_type = resp.headers.get("Content-Type", "") or meta_ct
+                    if not content_type.startswith("image/"):
+                        continue
+                    ext = _content_type_to_ext(content_type)
+                    data = await resp.read()
+                    path = cache_image_from_bytes(data, ext)
+                    media_paths.append(path)
+                    media_types.append(content_type.split(";")[0].strip())
+                    logger.info("%s: cached image %s → %s", conn.label, file_id, path)
+            except Exception as exc:
+                logger.warning("%s: error downloading file %s: %s", conn.label, file_id, exc)
+
+        return media_paths, media_types
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
