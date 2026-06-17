@@ -45,13 +45,15 @@ Multi-account via env vars:
 from __future__ import annotations
 
 import asyncio
+import base64
 import datetime
 import json
 import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode, urlparse
 
 import aiohttp
@@ -125,6 +127,20 @@ def _parse_channel_ids(raw) -> List[str]:
 def _extract_channel_id(chat_id: str) -> str:
     """Strip optional ':parent_id' suffix from a peer_id to get the channel UUID."""
     return chat_id.split(":")[0]
+
+
+def _sniff_mime(path: Path, raw: bytes) -> str:
+    """Detect image MIME type from magic bytes, fall back to extension."""
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if raw[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+            ".gif": "image/gif", ".webp": "image/webp"}.get(path.suffix.lower(), "image/jpeg")
 
 
 def _content_type_to_ext(content_type: str) -> str:
@@ -513,6 +529,88 @@ class OpenWebUIAdapter(BasePlatformAdapter):
 
     async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
         return {"name": _extract_channel_id(chat_id), "type": "channel"}
+
+    # ── Media sending ─────────────────────────────────────────────────────────
+
+    async def send_image(
+        self,
+        chat_id: str,
+        image_url: str,
+        caption: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> "SendResult":
+        """HTTP image URL → markdown inline image."""
+        alt = caption or ""
+        text = f"![{alt}]({image_url})"
+        if caption:
+            text = f"{caption}\n{text}"
+        return await self.send(chat_id=chat_id, content=text, reply_to=reply_to, metadata=metadata)
+
+    async def send_image_file(
+        self,
+        chat_id: str,
+        image_path: str,
+        caption: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        **kwargs,
+    ) -> "SendResult":
+        """Local image file → base64 data URL embedded in markdown."""
+        p = Path(image_path)
+        if not p.exists():
+            return await self.send(
+                chat_id=chat_id,
+                content=f"🖼️ {caption or p.name}",
+                reply_to=reply_to,
+            )
+        raw = p.read_bytes()
+        mime = _sniff_mime(p, raw)
+        b64 = base64.b64encode(raw).decode("ascii")
+        data_url = f"data:{mime};base64,{b64}"
+        alt = caption or p.name
+        text = f"![{alt}]({data_url})"
+        if caption:
+            text = f"{caption}\n{text}"
+        return await self.send(chat_id=chat_id, content=text, reply_to=reply_to)
+
+    async def send_voice(
+        self,
+        chat_id: str,
+        audio_path: str,
+        caption: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        **kwargs,
+    ) -> "SendResult":
+        name = Path(audio_path).name
+        text = f"🔊 {caption or name}"
+        return await self.send(chat_id=chat_id, content=text, reply_to=reply_to)
+
+    async def send_video(
+        self,
+        chat_id: str,
+        video_path: str,
+        caption: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        **kwargs,
+    ) -> "SendResult":
+        name = Path(video_path).name
+        text = f"🎬 {caption or name}"
+        return await self.send(chat_id=chat_id, content=text, reply_to=reply_to)
+
+    async def send_document(
+        self,
+        chat_id: str,
+        file_path: str,
+        caption: Optional[str] = None,
+        file_name: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        **kwargs,
+    ) -> "SendResult":
+        name = file_name or Path(file_path).name
+        text = f"📎 **{name}**"
+        if caption:
+            text = f"{caption}\n{text}"
+        return await self.send(chat_id=chat_id, content=text, reply_to=reply_to)
 
     # ── Typing helpers ────────────────────────────────────────────────────────
 
