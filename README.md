@@ -8,6 +8,7 @@ A [Hermes Agent](https://hermes-agent.com) platform plugin that connects Hermes 
 
 - **Multi-account support** — run multiple bot accounts from a single adapter instance (A bot → A channel, B bot → B channel)
 - **Real-time messaging** — receives and sends messages via Open WebUI's Socket.IO event system
+- **Image support** — downloads file attachments from Open WebUI and passes them to the agent as native vision input
 - **Typing indicator** — shows "typing..." while the agent is processing, clears when done
 - **Edit + delete** — supports `edit_message()` and `delete_message()` for streaming and progress cleanup
 - **Thread-aware** — isolates sessions per thread (`channel_id:parent_id`)
@@ -118,7 +119,18 @@ display:
   tool_progress: all      # Show tool progress as separate messages
   cleanup_progress: false # Keep progress messages visible (openclaw-style)
   interim_assistant_messages: true
+
+agent:
+  image_input_mode: native  # Required for local LLMs (lmstudio, ollama, etc.)
+                            # Cloud providers (Anthropic, OpenAI, OpenRouter) work
+                            # with the default "auto" and don't need this line.
 ```
+
+> **Image routing note:** Hermes detects vision capability via [models.dev](https://models.dev).
+> Cloud providers are listed there, so `auto` mode works out of the box.
+> Local model servers (LM Studio, Ollama, custom OpenAI-compatible endpoints) are not
+> in that database, so `auto` falls back to a text-based vision pipeline.
+> Set `image_input_mode: native` to skip the lookup and send images directly to your model.
 
 ## How it works
 
