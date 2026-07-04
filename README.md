@@ -132,6 +132,61 @@ agent:
 > in that database, so `auto` falls back to a text-based vision pipeline.
 > Set `image_input_mode: native` to skip the lookup and send images directly to your model.
 
+## Multi-bot architecture
+
+This plugin supports running multiple bot accounts from a **single gateway instance**. This is convenient — one process, one config — but comes with an important trade-off.
+
+### Single gateway (shared memory)
+
+When multiple accounts are configured under the same gateway, all bots share the same Hermes memory (`~/.hermes/memories/MEMORY.md`). Bot identities are separated only by `channel_prompts` in `config.yaml` — a text override appended to the system prompt per channel.
+
+This is suitable for lightweight role-play or persona bots. It is **not** true isolation: what one bot learns or remembers is visible to all bots running under the same gateway.
+
+```
+gateway (single process)
+  ├─ account: bot-a  → channel_prompt: "You are Alice..."
+  ├─ account: bot-b  → channel_prompt: "You are Bob..."
+  └─ account: bot-c  → channel_prompt: "You are Carol..."
+        ↑
+   shared SOUL.md, shared memories/, shared tools
+```
+
+### Multiple gateways (true memory isolation)
+
+For true per-bot memory isolation, run a separate Hermes gateway for each bot, each with its own `HERMES_HOME`:
+
+```bash
+# Bot A
+HERMES_HOME=~/.hermes-bot-a  hermes gateway start
+
+# Bot B
+HERMES_HOME=~/.hermes-bot-b  hermes gateway start
+```
+
+Each gateway has its own `SOUL.md`, `memories/`, `config.yaml`, and plugin instance. Configure this plugin separately in each `HERMES_HOME`:
+
+```
+~/.hermes-bot-a/
+  ├─ SOUL.md                  ← bot-a identity
+  ├─ memories/MEMORY.md       ← bot-a-only memory
+  └─ config.yaml              ← single account, this plugin
+      platforms:
+        - kind: open-webui-platform
+          extra:
+            base_url: http://...
+            accounts:
+              bot-a:
+                email: bot-a@local.com
+                ...
+
+~/.hermes-bot-b/
+  ├─ SOUL.md                  ← bot-b identity
+  ├─ memories/MEMORY.md       ← bot-b-only memory
+  └─ config.yaml              ← single account, this plugin
+```
+
+This requires more resources (one process per bot) but gives each bot a fully independent memory, skill set, and configuration.
+
 ## How it works
 
 ```
