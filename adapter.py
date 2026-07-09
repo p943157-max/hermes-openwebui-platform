@@ -259,7 +259,7 @@ class OpenWebUIAdapter(BasePlatformAdapter):
 
     # ── Connection lifecycle ──────────────────────────────────────────────────
 
-    async def connect(self) -> bool:
+    async def connect(self, *, is_reconnect: bool = False) -> bool:
         if not self.base_url:
             logger.error("open-webui: OPENWEBUI_URL / extra.base_url must be set")
             self._set_fatal_error("config_missing", "OPENWEBUI_URL not set", retryable=False)
